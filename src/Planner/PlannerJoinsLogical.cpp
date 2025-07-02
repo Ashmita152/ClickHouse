@@ -57,6 +57,7 @@
 
 #include <memory>
 #include <stack>
+#include <boost/algorithm/string.hpp>
 
 namespace DB
 {
@@ -431,6 +432,23 @@ void buildDisjunctiveJoinConditionsGeneral(const QueryTreeNodePtr & join_express
     addConditionsToJoinOperator(builder_context, std::move(built_clauses.at(join_expression.get())));
 }
 
+static String getQueryDisplayLabel(const QueryTreeNodePtr & node)
+{
+    const auto & printable_alias = node->getOriginalAlias();
+    const auto & internal_alias = node->getAlias();
+    if (!printable_alias.empty() && printable_alias != internal_alias)
+        return printable_alias;
+
+    if (const auto * table_node = node->as<TableNode>(); table_node && table_node->hasOriginalAST())
+    {
+        auto result = table_node->getOriginalAST()->formatForLogging();
+        boost::trim(result);
+        return result;
+    }
+
+    return {};
+}
+
 std::unique_ptr<JoinStepLogical> buildJoinStepLogical(
     const Block & left_header,
     const Block & right_header,
@@ -509,6 +527,10 @@ std::unique_ptr<JoinStepLogical> buildJoinStepLogical(
         settings[Setting::join_use_nulls],
         JoinSettings(settings),
         SortingStep::Settings(settings));
+
+    auto left_table_label = getQueryDisplayLabel(join_node.getLeftTableExpression());
+    auto right_table_label = getQueryDisplayLabel(join_node.getRightTableExpression());
+    join_step->setInputLabels(std::move(left_table_label), std::move(right_table_label));
     return join_step;
 }
 
@@ -546,21 +568,3 @@ PreparedJoinStorage tryGetStorageInTableJoin(const QueryTreeNodePtr & table_expr
 }
 
 }
-
-
-// static String getQueryDisplayLabel(const QueryTreeNodePtr & node)
-// {
-//     const auto & printable_alias = node->getOriginalAlias();
-//     const auto & internal_alias = node->getAlias();
-//     if (!printable_alias.empty() && printable_alias != internal_alias)
-//         return printable_alias;
-
-//     if (const auto * table_node = node->as<TableNode>(); table_node && table_node->hasOriginalAST())
-//     {
-//         auto result = table_node->getOriginalAST()->formatForLogging();
-//         boost::trim(result);
-//         return result;
-//     }
-
-//     return {};
-// }

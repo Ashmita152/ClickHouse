@@ -4,7 +4,6 @@
 #include <Core/Joins.h>
 #include <Interpreters/JoinOperator.h>
 #include <Interpreters/JoinExpressionActions.h>
-#include <Processors/QueryPlan/Optimizations/joinCost.h>
 
 namespace DB
 {
@@ -48,6 +47,21 @@ struct DPJoinEntry
                 JoinMethod join_method_ = JoinMethod::Hash);
 
     bool isLeaf() const;
+
+    String dump() const;
+};
+
+struct ColumnStats
+{
+    UInt64 num_distinct_values;
+};
+
+struct RelationStats
+{
+    size_t estimated_rows = 0;
+    std::unordered_map<String, ColumnStats> column_stats = {};
+
+    String table_name;
 };
 
 struct QueryGraph
@@ -60,7 +74,8 @@ struct QueryGraph
     std::unordered_map<JoinActionRef, BitSet> pinned;
 };
 
-DPJoinEntryPtr optimizeJoinOrder(QueryGraph query_graph);
 
+
+DPJoinEntryPtr optimizeJoinOrder(QueryGraph query_graph);
 
 }

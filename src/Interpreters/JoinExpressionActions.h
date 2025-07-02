@@ -5,6 +5,7 @@
 #include <boost/dynamic_bitset.hpp>
 #include <Core/Joins.h>
 #include <Functions/IFunctionAdaptors.h>
+#include <base/types.h>
 
 namespace DB
 {
@@ -44,12 +45,12 @@ public:
         return *this;
     }
 
-    int getMaxSetPosition() const;
+    int findFirstSet() const;
 
     size_t count() const { return bitset.count(); }
     bool any() const { return bitset.any(); }
     bool none() const { return bitset.none(); }
-    bool test(size_t pos) const { return bitset.test(pos); }
+    bool test(size_t pos) const { return pos < bitset.size() && bitset.test(pos); }
 
     friend bool operator ==(const BitSet & lhs, const BitSet & rhs)
     {
@@ -82,6 +83,8 @@ public:
     operator bool() const { return bitset.any(); } /// NOLINT
 
 private:
+    friend struct std::hash<BitSet>;
+
     using Base = boost::dynamic_bitset<>;
 
     static void adjustSize(const BitSet & lhs, const BitSet & rhs)
@@ -90,6 +93,8 @@ private:
         lhs.bitset.resize(max_size);
         rhs.bitset.resize(max_size);
     }
+
+    size_t hashImpl() const;
 
     explicit BitSet(Base && base) : bitset(std::move(base)) {}
 
@@ -196,8 +201,9 @@ public:
     std::tuple<JoinConditionOperator, JoinActionRef, JoinActionRef> asBinaryPredicate() const;
 
     friend bool operator==(const JoinActionRef & left, const JoinActionRef & right) { return left.node_ptr == right.node_ptr; }
+    friend struct std::hash<JoinActionRef>;
 
-private:
+    private:
     std::shared_ptr<JoinExpressionActions::Data> getData() const;
     static std::shared_ptr<JoinExpressionActions::Data> getData(const std::vector<JoinActionRef> & actions);
     static ActionsDAG & getActionsDAG(JoinExpressionActions::Data & data_);
@@ -210,5 +216,7 @@ private:
 
 template <> struct std::hash<DB::JoinActionRef>
 {
-    size_t operator()(const DB::JoinActionRef & ref) const { return std::hash<const DB::ActionsDAG::Node *>()(ref.getNode()); }
+    size_t operator()(const DB::JoinActionRef & ref) const { return std::hash<const DB::ActionsDAG::Node *>()(ref.node_ptr); }
 };
+
+template <> struct std::hash<DB::BitSet> { size_t operator()(const DB::BitSet & bs) const { return bs.hashImpl(); } };

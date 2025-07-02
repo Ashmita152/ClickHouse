@@ -96,6 +96,8 @@ struct JoinSettings
     explicit JoinSettings(const QueryPlanSerializationSettings & settings);
 
     void updatePlanSettings(QueryPlanSerializationSettings & settings) const;
+
+    bool operator==(const JoinSettings & other) const = default;
 };
 
 

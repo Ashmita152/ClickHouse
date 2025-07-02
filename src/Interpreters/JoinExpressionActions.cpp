@@ -3,6 +3,7 @@
 #include <Core/Block.h>
 #include <boost/noncopyable.hpp>
 #include <Functions/isNotDistinctFrom.h>
+#include <Common/HashTable/Hash.h>
 
 
 #include <Functions/FunctionFactory.h>
@@ -16,7 +17,6 @@ namespace DB
 
 namespace ErrorCodes
 {
-    extern const int INCORRECT_DATA;
     extern const int LOGICAL_ERROR;
     extern const int UNKNOWN_IDENTIFIER;
 }
@@ -46,25 +46,40 @@ String toString(const BitSet & bs)
     return str;
 }
 
-// int BitSet::getMaxSetPosition() const
-// {
-//     if (bitset.none())
-//         return -1;
+int BitSet::findFirstSet() const
+{
+    if (bitset.none())
+        return -1;
 
-//     size_t pos = bitset.find_first();
-//     size_t maxPos = pos;
+    size_t pos = bitset.find_first();
+    size_t maxPos = pos;
 
-//     while (pos != Base::npos)
-//     {
-//         maxPos = pos;
-//         pos = bitset.find_next(pos);
-//     }
+    while (pos != Base::npos)
+    {
+        maxPos = pos;
+        pos = bitset.find_next(pos);
+    }
 
-//     if (maxPos > std::numeric_limits<int>::max())
-//         throw Exception(ErrorCodes::LOGICAL_ERROR, "BitSet is too large");
+    if (maxPos > std::numeric_limits<int>::max())
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "BitSet is too large");
 
-//     return static_cast<int>(maxPos);
-// }
+    return static_cast<int>(maxPos);
+}
+
+size_t BitSet::hashImpl() const
+{
+    if (likely(bitset.size() <= std::numeric_limits<unsigned long>::digits))
+        return std::hash<unsigned long>()(bitset.to_ulong());
+
+    UInt64 hash = 0;
+    auto pos = bitset.find_first();
+    while (pos != Base::npos)
+    {
+        intHashCRC32(hash, pos);
+        pos = bitset.find_next(pos);
+    }
+    return hash;
+}
 
 struct JoinExpressionActions::Data : boost::noncopyable
 {
@@ -112,14 +127,14 @@ JoinExpressionActions::JoinExpressionActions(const Block & left_header, const Bl
 
     const auto & input_nodes = actions_dag_.getInputs();
     if (input_nodes.size() != left_header.columns() + right_header.columns())
-        throw Exception(ErrorCodes::INCORRECT_DATA, "Input nodes size mismatch in dag: {}, expected: [{}], [{}]",
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Input nodes size mismatch in dag: {}, expected: [{}], [{}]",
                         actions_dag_.dumpDAG(), left_header.dumpNames(), right_header.dumpNames());
 
     for (size_t i = 0; i < input_nodes.size(); ++i)
     {
         BitSet rels;
         if (input_nodes[i]->type != ActionsDAG::ActionType::INPUT)
-            throw Exception(ErrorCodes::INCORRECT_DATA, "Input node {} is not INPUT in dag: {}",
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Input node {} is not INPUT in dag: {}",
                             i, actions_dag_.dumpDAG());
         rels.set(i < left_header.columns() ? 0 : 1);
         expression_sources[input_nodes[i]] = rels;

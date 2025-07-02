@@ -122,8 +122,8 @@ static void addToNullableIfNeeded(
         if (node->result_name != original_name)
             node = &actions_dag->addAlias(*node, std::move(original_name));
 
-        outputs.push_back(node);
         actions_after_join.push_back(node);
+        outputs.push_back(node);
     }
 
     if (outputs.empty())
@@ -188,9 +188,59 @@ String formatJoinCondition(const std::vector<JoinActionRef> & predicates)
     return fmt::format("{}", fmt::join(predicates | std::views::transform([](const auto & x) { return x.getColumnName(); }), " AND "));
 }
 
+std::string_view joinTypePretty(JoinKind join_kind, JoinStrictness strictness)
+{
+    // Inner Join: ⋈ (Unicode U+22C8)
+    // Left Outer Join: ⟕ (Unicode U+27D5)
+    // Right Outer Join: ⟖ (Unicode U+27D6)
+    // Full Outer Join: ⟗ (Unicode U+27D7)
+    // Semi Join: ⋉ (Unicode U+22C9)
+    // Right Semi Join: ⋊ (Unicode U+22CA)
+    // Anti Join: ⋉̸ (Unicode U+22C9 U+0338)
+    // Right Anti Join: ⋊̸ (Unicode U+22CA U+0338)
+    // Cross Join: × (Unicode U+00D7)
+
+    auto symbols = std::array{
+        //          Inner     Left            Right           Full      Cross     Comma
+        std::array{"\u22C8", "\u27D5",       "\u27D6",       "\u27D7", "\u00D7", ","     },  // All/Any
+        std::array{"\u22C8", "\u22C9",       "\u22CA",       "\u22C8", "\u22C8", "\u22C8"},  // Semi
+        std::array{"\u22C8", "\u22C9\u0338", "\u22CA\u0338", "\u22C8", "\u22C8", "\u22C8"},  // Anti
+    };
+
+    size_t row = 0;
+    switch (strictness)
+    {
+        case JoinStrictness::Semi: row = 1; break;
+        case JoinStrictness::Anti: row = 2; break;
+        default: break;
+    }
+    size_t col = 0;
+    switch (join_kind)
+    {
+        case JoinKind::Inner: col = 0; break;
+        case JoinKind::Left: col = 1; break;
+        case JoinKind::Right: col = 2; break;
+        case JoinKind::Full: col = 3; break;
+        case JoinKind::Cross: col = 4; break;
+        case JoinKind::Comma: col = 5; break;
+        default: break;
+    }
+    return symbols[row][col];
+}
+
+std::string_view joinTypePretty(const JoinOperator & join_operator)
+{
+    return joinTypePretty(join_operator.kind, join_operator.strictness);
+}
+
 std::vector<std::pair<String, String>> JoinStepLogical::describeJoinProperties() const
 {
     std::vector<std::pair<String, String>> description;
+
+    if (!left_table_label.empty() && !right_table_label.empty())
+    {
+        description.emplace_back("Join", fmt::format("`{}` {} `{}`", left_table_label, joinTypePretty(join_operator), right_table_label));
+    }
 
     description.emplace_back("Type", toString(join_operator.kind));
     description.emplace_back("Strictness", toString(join_operator.strictness));
@@ -940,7 +990,6 @@ std::optional<ActionsDAG::ActionsForFilterPushDown> JoinStepLogical::getFilterAc
         auto filter_to_push_down = ActionsDAG::createActionsForConjunction({filter_condition.getNode()}, stream_header.getColumnsWithTypeAndName());
         return filter_to_push_down;
 
-        // TODO: try use `createActionsForConjunction`
         // filter_column_name = filter_condition.getColumnName();
         // ActionsDAG new_dag = JoinExpressionActions::getSubDAG(filter_condition);
         // if (new_dag.getOutputs().size() != 1)

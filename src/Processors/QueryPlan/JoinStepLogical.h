@@ -2,6 +2,8 @@
 
 #include <memory>
 #include <optional>
+#include <string_view>
+#include <utility>
 #include <Interpreters/JoinOperator.h>
 #include <Processors/QueryPlan/IQueryPlanStep.h>
 #include <Processors/QueryPlan/ISourceStep.h>
@@ -9,7 +11,6 @@
 #include <Processors/QueryPlan/JoinStep.h>
 #include <Processors/QueryPlan/SortingStep.h>
 #include <Processors/QueryPlan/QueryPlan.h>
-#include <Processors/QueryPlan/Optimizations/joinCost.h>
 #include <Core/Joins.h>
 #include <Interpreters/JoinExpressionActions.h>
 namespace DB
@@ -125,6 +126,23 @@ public:
         QueryPlan::Nodes & nodes);
 
     bool changesColumnsType() const { return false; }
+
+    bool isOptimized() const { return optimized; }
+    void setOptimized() { optimized = true; }
+
+    void setInputLabels(String left_table_label_, String right_table_label_)
+    {
+        left_table_label = std::move(left_table_label_);
+        right_table_label = std::move(right_table_label_);
+    }
+
+    std::pair<std::string_view, std::string_view> getInputLabels() const
+    {
+        std::string_view left_label = left_table_label;
+        std::string_view right_label = right_table_label;
+        return {left_label, right_label};
+    }
+
 protected:
     void updateOutputHeader() override;
 
@@ -138,9 +156,13 @@ protected:
     /// It can be input or node with toNullable function applied to input
     std::vector<const ActionsDAG::Node *> actions_after_join = {};
 
+    String left_table_label;
+    String right_table_label;
+
     JoinSettings join_settings;
     SortingStep::Settings sorting_settings;
 
+    bool optimized = false;
     std::unique_ptr<JoinAlgorithmParams> join_algorithm_params;
     VolumePtr tmp_volume;
     TemporaryDataOnDiskScopePtr tmp_data;
@@ -168,5 +190,8 @@ private:
     bool optimized = false;
     QueryPlan child_plan;
 };
+
+std::string_view joinTypePretty(JoinKind join_kind, JoinStrictness strictness);
+
 
 }
