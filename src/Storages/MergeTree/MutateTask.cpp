@@ -4,11 +4,6 @@
 #include <Disks/SingleDiskVolume.h>
 #include <IO/HashingWriteBuffer.h>
 #include <IO/WriteBufferFromString.h>
-#include "Common/Logger.h"
-#include "Common/StackTrace.h"
-#include <Common/logger_useful.h>
-#include <Common/escapeForFileName.h>
-#include <Core/Settings.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskFull.h>
 #include <Storages/Statistics/Statistics.h>
 #include <Columns/ColumnsNumber.h>
@@ -41,8 +36,12 @@
 #include <DataTypes/DataTypeVariant.h>
 #include <boost/algorithm/string/replace.hpp>
 #include <Common/ProfileEventsScope.h>
-#include "Core/Names.h"
+#include <Core/Settings.h>
+#include <Core/Names.h>
 #include <Core/ColumnsWithTypeAndName.h>
+#include <Common/Logger.h>
+#include <Common/logger_useful.h>
+#include <Common/escapeForFileName.h>
 
 #include <algorithm>
 
@@ -1379,10 +1378,7 @@ class MutateAllPartColumnsTask : public IExecutableTask
 {
 public:
 
-    explicit MutateAllPartColumnsTask(MutationContextPtr ctx_) : ctx(ctx_)
-    {
-        LOG_DEBUG(getLogger("MutateAllPartColumnsTask"), "ctor");
-    }
+    explicit MutateAllPartColumnsTask(MutationContextPtr ctx_) : ctx(ctx_) {}
 
     void onCompleted() override { throw Exception(ErrorCodes::LOGICAL_ERROR, "Not implemented"); }
     StorageID getStorageID() const override { throw Exception(ErrorCodes::LOGICAL_ERROR, "Not implemented"); }
@@ -1730,10 +1726,7 @@ private:
 class MutateSomePartColumnsTask : public IExecutableTask
 {
 public:
-    explicit MutateSomePartColumnsTask(MutationContextPtr ctx_) : ctx(ctx_)
-    {
-        LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "ctor");
-    }
+    explicit MutateSomePartColumnsTask(MutationContextPtr ctx_) : ctx(ctx_) {}
 
     void onCompleted() override { throw Exception(ErrorCodes::LOGICAL_ERROR, "Not implemented"); }
     StorageID getStorageID() const override { throw Exception(ErrorCodes::LOGICAL_ERROR, "Not implemented"); }
@@ -1804,10 +1797,6 @@ private:
         /// NOTE: Renames must be done in order
         for (const auto & [rename_from, rename_to] : ctx->files_to_rename)
         {
-
-            LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "files_to_rename {} -> {}",
-                rename_from, rename_to);
-
             if (rename_to.empty()) /// It's DROP COLUMN
             {
                 /// pass
@@ -1824,8 +1813,6 @@ private:
         {
             const String & file_name = it->name();
 
-            LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "list {}", file_name);
-
             if (ctx->files_to_skip.contains(file_name))
                 continue;
 
@@ -1841,9 +1828,6 @@ private:
             }
 
             String destination = it->name();
-
-            LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "rename unchanged {} -> {}",
-                file_name, destination);
 
             if (it->isFile())
             {
@@ -1900,12 +1884,8 @@ private:
         ctx->new_data_part->checksums = ctx->source_part->checksums;
 
         auto source_checksums_files = ctx->source_part->checksums.getFileNames();
-        LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "source parts checksums files {} : {}", source_checksums_files.size(), fmt::join(source_checksums_files, ", "));
 
         ctx->compression_codec = ctx->source_part->default_codec;
-
-        LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "prepare has pipelinebuilder {} updated header {}",
-            ctx->mutating_pipeline_builder.initialized(), ctx->updated_header.getNamesAndTypesList().toNamesAndTypesDescription());
 
         if (ctx->mutating_pipeline_builder.initialized())
         {
@@ -1928,8 +1908,6 @@ private:
 
             if (!subqueries.empty())
                 builder = addCreatingSetsTransform(std::move(builder), std::move(subqueries), ctx->context);
-
-            LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "prepare, columns: {}", ctx->updated_header.getNamesAndTypesList().toNamesAndTypesDescription());
 
             ctx->out = std::make_shared<MergedColumnOnlyOutputStream>(
                 ctx->new_data_part,
@@ -1981,16 +1959,12 @@ private:
 
         for (const auto & [rename_from, rename_to] : ctx->files_to_rename)
         {
-            LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "finalize, files_to_rename {} -> {}, remove to/from", rename_from, rename_to);
-            ctx->new_data_part->checksums.files.erase(rename_from);
             if (!rename_to.empty())
                 ctx->new_data_part->checksums.files.erase(rename_to);
         }
 
         for (const auto & [rename_from, rename_to] : ctx->files_to_rename)
         {
-            LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "finalize, files_to_rename {} -> {}", rename_from, rename_to);
-
             if (!rename_to.empty())
                 ctx->new_data_part->checksums.files[rename_to] = ctx->source_part->checksums.files.at(rename_from);
         }
@@ -2011,7 +1985,6 @@ private:
         {
             if (name.ends_with(proj_suffix) && !active_projections.contains(name) && ctx->new_data_part->checksums.has(name))
             {
-                LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "files_to_skip: remove file from checksums {}", name);
                 ctx->new_data_part->checksums.remove(name);
             }
         }
@@ -2036,8 +2009,6 @@ private:
         // Otherwise new files are not visible because they have not been written yet
         for (const String & removed_file : files_to_remove_after_finish)
         {
-            LOG_DEBUG(getLogger("MutateSomePartColumnsTask"), "remove file from fs {}, existsFile {}",
-                removed_file, ctx->new_data_part->getDataPartStorage().existsFile(removed_file));
             ctx->new_data_part->getDataPartStorage().removeFile(removed_file);
         }
     }
@@ -2518,8 +2489,6 @@ bool MutateTask::prepare()
         ctx->new_data_part->existing_rows_count = ctx->source_part->existing_rows_count.value_or(ctx->source_part->rows_count);
     }
 
-
-    LOG_DEBUG(getLogger("MutateTask"), "dynColmns {} is wide {} is full {} affect all {}", MutationHelpers::haveMutationsOfDynamicColumns(ctx->source_part, ctx->commands_for_part), isWidePart(ctx->source_part), isFullPartStorage(ctx->source_part->getDataPartStorage()), (ctx->interpreter && ctx->interpreter->isAffectingAllColumns()));
     /// All columns from part are changed and may be some more that were missing before in part
     /// TODO We can materialize compact part without copying data
     /// Also currently mutations of types with dynamic subcolumns in Wide part are possible only by
