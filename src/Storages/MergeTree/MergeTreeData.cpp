@@ -4007,7 +4007,7 @@ void MergeTreeData::checkAlterIsPossible(const AlterCommands & commands, Context
 
             if (old_metadata.columns.has(command.column_name))
             {
-                dropped_columns.emplace(command.column_name);
+                dropped_columns.emplace(command.column_name); /// What if clear is true?
             }
             else
             {
@@ -4913,7 +4913,7 @@ void MergeTreeData::checkChecksumsFileIsConsistentWithFileSystem(MutableDataPart
     {
         auto it = part->checksums.files.find(file);
         chassert(it != part->checksums.files.end());
-        files_in_checksums_with_size.push_back(fmt::format("{} ({})", file, it->second.file_size));
+        files_in_checksums_with_size.push_back(fmt::format("{} ({} bytes)", file, it->second.file_size));
     }
 
     LOG_DEBUG(getLogger("checkChecksumsFileIsConsistentWithFileSystem"),

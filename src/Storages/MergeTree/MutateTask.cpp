@@ -154,17 +154,23 @@ static void splitAndModifyMutationCommands(
     bool suitable_for_ttl_optimization,
     LoggerPtr log)
 {
+    LOG_TRACE(log, "splitAndModifyMutationCommands, Splitting mutation commands for part {}, commands: {}", part->name, commands.toString());
+
     auto part_columns = part->getColumnsDescription();
     const auto & table_columns = metadata_snapshot->getColumns();
 
     if (haveMutationsOfDynamicColumns(part, commands) || !isWidePart(part) || !isFullPartStorage(part->getDataPartStorage()))
     {
+        LOG_TRACE(log, "1");
+
         NameSet mutated_columns;
         NameSet dropped_columns;
         NameSet ignored_columns;
 
         for (const auto & command : commands)
         {
+            LOG_TRACE(log, "1 command.clear: {}", command.clear);
+
             if (command.type == MutationCommand::Type::MATERIALIZE_COLUMN)
             {
                 /// For ordinary column with default or materialized expression, MATERIALIZE COLUMN should not override past values
@@ -198,8 +204,8 @@ static void splitAndModifyMutationCommands(
                 }
             }
             else if (command.type == MutationCommand::Type::DROP_INDEX
-                     || command.type == MutationCommand::Type::DROP_PROJECTION
-                     || command.type == MutationCommand::Type::DROP_STATISTICS)
+                    || command.type == MutationCommand::Type::DROP_PROJECTION
+                    || command.type == MutationCommand::Type::DROP_STATISTICS)
             {
                 for_file_renames.push_back(command);
             }
@@ -288,6 +294,7 @@ static void splitAndModifyMutationCommands(
                                         part->storage.getStorageID().getNameForLogs(), table_metadata_version);
                 }
 
+
                 for_interpreter.emplace_back(
                     MutationCommand{.type = MutationCommand::Type::READ_COLUMN, .column_name = column.name, .data_type = column.type});
             }
@@ -305,8 +312,12 @@ static void splitAndModifyMutationCommands(
     }
     else
     {
+        LOG_TRACE(log, "else 1");
+
         for (const auto & command : commands)
         {
+            LOG_TRACE(log, "else 1 command.clear: {} type: {}", command.clear, command.type);
+
             if (command.type == MutationCommand::Type::MATERIALIZE_COLUMN)
             {
                 /// For ordinary column with default or materialized expression, MATERIALIZE COLUMN should not override past values
@@ -325,9 +336,10 @@ static void splitAndModifyMutationCommands(
             {
                 for_interpreter.push_back(command);
             }
-            else if (command.type == MutationCommand::Type::DROP_INDEX
-                     || command.type == MutationCommand::Type::DROP_PROJECTION
-                     || command.type == MutationCommand::Type::DROP_STATISTICS)
+            else if (command.type == MutationCommand::Type::DROP_COLUMN
+                    || command.type == MutationCommand::Type::DROP_INDEX
+                    || command.type == MutationCommand::Type::DROP_PROJECTION
+                    || command.type == MutationCommand::Type::DROP_STATISTICS)
             {
                 for_file_renames.push_back(command);
             }
@@ -1897,7 +1909,7 @@ private:
         for (const auto & file_to_skip : ctx->files_to_skip)
             ctx->new_data_part->checksums.remove(file_to_skip);
 
-        LOG_TRACE(ctx->log, "MutateSomePartColumnsTask: source part {} checksums files: {}", ctx->source_part->name, fmt::join(ctx->source_part->checksums.getFileNames(), ", "));
+        LOG_TRACE(ctx->log, "MutateSomePartColumnsTask: source part {} checksums files: {}", ctx->source_part->name, fmt::join(ctx->source_part->checksums.getFileNamesWithSizes(), ", "));
 
         ctx->compression_codec = ctx->source_part->default_codec;
 
@@ -1976,12 +1988,8 @@ private:
 
         for (const auto & [rename_from, rename_to] : ctx->files_to_rename)
         {
-            if (!rename_to.empty())
-                ctx->new_data_part->checksums.files.erase(rename_to);
-        }
+            ctx->new_data_part->checksums.files.erase(rename_from);
 
-        for (const auto & [rename_from, rename_to] : ctx->files_to_rename)
-        {
             if (!rename_to.empty())
                 ctx->new_data_part->checksums.files[rename_to] = ctx->source_part->checksums.files.at(rename_from);
         }
@@ -2587,6 +2595,8 @@ bool MutateTask::prepare()
             ctx->new_data_part,
             ctx->for_file_renames,
             ctx->mrk_extension);
+        LOG_TRACE(ctx->log, "MutateTask::prepare: files_to_rename: {}", fmt::join(ctx->files_to_rename, ", "));
+
 
         /// In case of replicated merge tree with zero copy replication
         /// Here Clickhouse has to follow the common procedure when deleting new part in temporary state
