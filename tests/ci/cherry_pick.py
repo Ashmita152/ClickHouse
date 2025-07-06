@@ -593,6 +593,7 @@ class CherryPickPRs:
         self.repo = gh.get_repo(repo)
         self.dry_run = dry_run
         self.error = None  # type: Optional[Exception]
+        self.release_prs = gh.get_release_pulls(repo)
 
     def get_open_cherry_pick_prs(self) -> PullRequests:
         """
@@ -605,7 +606,7 @@ class CherryPickPRs:
         logging.info("Query to find the cherry-pick PRs:\n %s", query_args)
         return self.gh.get_pulls_from_search(**query_args)
 
-    def remove_backported_labels(self) -> None:
+    def check_open_prs(self) -> None:
         """
         After the cherry-pick PRs are closed, the original PRs are marked as
         `pr-backports-created`. If the cherry-pick PR is reopened, we remove this label
@@ -617,6 +618,28 @@ class CherryPickPRs:
             logging.error("Error while getting open cherry-pick PRs: %s", e)
             self.error = e
             return
+
+        # We need to check if there is an open release branch for each cherry-pick PR
+        for pr in prs.copy():
+            # We need to copy the list, since we will modify it
+            #
+            try:
+                if not self._check_opened_release(pr):
+                    # The cherry-pick PR is not opened in any of the release branches,
+                    # so we can skip it
+                    prs.remove(pr)
+                    continue
+            except Exception as e:
+                logging.error(
+                    "Error while checking opened release branch for cherry-pick PR #%s: %s",
+                    pr.number,
+                    e,
+                )
+                self.error = e
+                continue
+
+        # And then, we need to check if the original PR is marked as backported for any
+        # open cherry-pick PR
         for pr in prs:
             try:
                 self._remove_backported_label(pr)
@@ -626,6 +649,33 @@ class CherryPickPRs:
                 )
                 self.error = e
                 continue
+
+    def _check_opened_release(self, cpp: PullRequest) -> bool:
+        """
+        Check if the original PR is opened in any of the release branches.
+        """
+        # The cherry-pick's head ref is like cherrypick/{release_name}/12345,
+        # so we can extract the release name from it, and then try to find it in the
+        # self.release_prs
+        release_name = cpp.head.ref.split("/")[1].rsplit("/", maxsplit=1)[0]
+        if release_name in [r.head.ref for r in self.release_prs]:
+            # The release branch is opened, so we can continue
+            return True
+        logging.info(
+            "An open release PR for cherry-pick PR #%s is not found, going to close it",
+            cpp.number,
+        )
+        if self.dry_run:
+            logging.info(
+                "DRY RUN: would close and leave a comment in the cherry-pick PR #%s",
+                cpp.number,
+            )
+            return False
+        cpp.create_issue_comment(
+            "The release branch for the cherry-pick is not opened, closing the PR."
+        )
+        cpp.edit(state="closed")
+        return False
 
     def _remove_backported_label(self, pr: PullRequest) -> None:
         # The `updated_at` is Optional[datetime]
@@ -701,7 +751,7 @@ def main():
     # First, check if some cherry-pick PRs are reopened and original PRs are mared as
     # done
     cpp = CherryPickPRs(gh, args.repo, args.dry_run)
-    cpp.remove_backported_labels()
+    cpp.check_open_prs()
 
     bpp = BackportPRs(gh, args.repo, args.dry_run)
 
